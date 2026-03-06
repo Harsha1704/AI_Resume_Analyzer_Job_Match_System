@@ -1,11 +1,15 @@
-from PyPDF2 import PdfReader
+import pdfplumber
 
-def extract_text_from_pdf(file_path: str) -> str:
+def extract_text_from_pdf(file):
+
     text = ""
-    try:
-        reader = PdfReader(file_path)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-    except Exception as e:
-        print(f"Error extracting PDF: {e}")
-    return text.strip()
+
+    with pdfplumber.open(file) as pdf:
+
+        for page in pdf.pages:
+            content = page.extract_text()
+
+            if content:
+                text += content
+
+    return text

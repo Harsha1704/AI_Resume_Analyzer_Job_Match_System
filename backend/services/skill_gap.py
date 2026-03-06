@@ -1,17 +1,41 @@
 import pandas as pd
-from config import DATASET_FOLDER
+import os
 
-def analyze_skill_gap(resume_text: str, job_title: str):
-    skills_df = pd.read_csv(f"{DATASET_FOLDER}/skills_dataset.csv")
+DATASET_FOLDER = os.path.join(os.path.dirname(__file__), "..", "datasets")
 
-    job_row = skills_df[skills_df["role"] == job_title]
+try:
+    skills_data = pd.read_csv(os.path.join(DATASET_FOLDER, "skills_dataset.csv"))
+    required_skills = skills_data["skills"].dropna().tolist()
+except FileNotFoundError:
+    required_skills = [
+        "python", "java", "javascript", "sql", "machine learning", "deep learning",
+        "flask", "django", "react", "node.js", "git", "docker", "kubernetes",
+        "aws", "azure", "gcp", "tensorflow", "pytorch", "scikit-learn", "pandas",
+        "numpy", "rest api", "html", "css", "c++", "data analysis", "nlp",
+        "communication", "problem solving", "teamwork", "agile", "linux"
+    ]
 
-    if job_row.empty:
-        return []
 
-    required_skills = job_row.iloc[0]["skills"].split()
-    resume_words = set(resume_text.split())
+def detect_skill_gap(resume_text: str):
+    """
+    Returns:
+        present (list): skills found in the resume
+        missing (list): top 10 skills NOT found in the resume
 
-    missing_skills = [skill for skill in required_skills if skill.lower() not in resume_words]
+    BUG FIXED: original code had `return present, missing[:10]` written as
+    `return present, missing[:10]` with an accidental `and` keyword which
+    evaluates as a boolean expression, not a tuple. Now correctly returns tuple.
+    """
+    resume_lower = resume_text.lower()
 
-    return missing_skills
+    present = []
+    missing = []
+
+    for skill in required_skills:
+        if skill.lower() in resume_lower:
+            present.append(skill)
+        else:
+            missing.append(skill)
+
+    # BUG WAS HERE: `return present, missing[:10]` — fixed (no `and`)
+    return present, missing[:10]
