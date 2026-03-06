@@ -1,44 +1,42 @@
 import pandas as pd
 import os
+from config import DATASET_FOLDER, MODEL_FOLDER
 
-DATASET_FOLDER = os.path.join(os.path.dirname(__file__), "..", "datasets")
-MODEL_FOLDER = os.path.join(os.path.dirname(__file__), "..", "models")
-
-# Try loading pre-trained vectorizer and job dataset
-# Falls back to keyword matching if model files are not present yet
-_use_ml = False
-jobs = None
-vectorizer = None
-job_vectors = None
-
+# Load real job descriptions + vectorizer
 try:
-    from sklearn.metrics.pairwise import cosine_similarity
     import joblib
+    from sklearn.metrics.pairwise import cosine_similarity
 
     jobs = pd.read_csv(os.path.join(DATASET_FOLDER, "job_descriptions.csv"))
     vectorizer = joblib.load(os.path.join(MODEL_FOLDER, "tfidf_vectorizer.pkl"))
     job_vectors = vectorizer.transform(jobs["description"])
     _use_ml = True
+    print(f"[job_matcher] Loaded {len(jobs)} job descriptions with ML model")
 
 except Exception as e:
     print(f"[job_matcher] ML model not available, using keyword fallback: {e}")
+    _use_ml = False
+    jobs = None
+    vectorizer = None
+    job_vectors = None
 
-    # Fallback job list for development/testing
     FALLBACK_JOBS = [
-        {"title": "Python Developer", "keywords": ["python", "django", "flask", "rest api"]},
-        {"title": "Data Scientist", "keywords": ["python", "machine learning", "pandas", "numpy", "scikit-learn"]},
-        {"title": "Frontend Developer", "keywords": ["javascript", "react", "html", "css", "node.js"]},
-        {"title": "DevOps Engineer", "keywords": ["docker", "kubernetes", "aws", "linux", "ci/cd"]},
-        {"title": "ML Engineer", "keywords": ["tensorflow", "pytorch", "deep learning", "nlp", "python"]},
-        {"title": "Backend Developer", "keywords": ["java", "sql", "rest api", "spring", "microservices"]},
-        {"title": "Cloud Architect", "keywords": ["aws", "azure", "gcp", "docker", "terraform"]},
-        {"title": "Data Analyst", "keywords": ["sql", "excel", "python", "data analysis", "tableau"]},
+        {"title": "INFORMATION-TECHNOLOGY", "keywords": ["python", "java", "sql", "git", "linux", "api"]},
+        {"title": "FINANCE",                "keywords": ["accounting", "excel", "finance", "banking", "audit"]},
+        {"title": "HR",                     "keywords": ["recruitment", "hr", "payroll", "training", "policy"]},
+        {"title": "SALES",                  "keywords": ["sales", "crm", "negotiation", "targets", "clients"]},
+        {"title": "HEALTHCARE",             "keywords": ["medical", "nursing", "clinical", "patient", "health"]},
+        {"title": "ENGINEERING",            "keywords": ["autocad", "mechanical", "electrical", "design", "matlab"]},
+        {"title": "TEACHER",                "keywords": ["teaching", "curriculum", "education", "students", "training"]},
+        {"title": "BANKING",                "keywords": ["banking", "loans", "finance", "compliance", "risk"]},
     ]
 
 
 def match_jobs(resume_text: str) -> list:
     """
-    Returns top 5 job matches as list of dicts: [{job_title, score}, ...]
+    Returns top 5 matching jobs as list of dicts: [{job_title, score}]
+    Uses cosine similarity with TF-IDF if model available,
+    otherwise falls back to keyword scoring.
     """
     if _use_ml:
         from sklearn.metrics.pairwise import cosine_similarity
@@ -55,10 +53,8 @@ def match_jobs(resume_text: str) -> list:
         ]
 
     else:
-        # Keyword-based fallback scoring
         resume_lower = resume_text.lower()
         scored = []
-
         for job in FALLBACK_JOBS:
             matches = sum(1 for kw in job["keywords"] if kw in resume_lower)
             score = round((matches / len(job["keywords"])) * 100, 2)

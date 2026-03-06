@@ -1,3 +1,9 @@
+import sys
+import os
+
+# Add backend directory to path so services can import config/utils
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -31,33 +37,36 @@ def analyze_resume():
     if not resume_text:
         return jsonify({"error": "resume_text missing"}), 400
 
-    # parse_resume now just cleans the raw text (no PDF extraction needed here)
+    # Step 1: Clean resume text
     parsed_resume = parse_resume(resume_text)
 
-    # Returns (score_float, matched_skills_list)
+    # Step 2: ATS Score → (float, list)
     ats_score, matched_skills = calculate_ats_score(parsed_resume)
 
+    # Step 3: Job Matches → list of {job_title, score}
     jobs = match_jobs(parsed_resume)
 
-    # Returns (present_skills_list, missing_skills_list)
+    # Step 4: Skill Gap → (present list, missing list)
     present_skills, missing_skills = detect_skill_gap(parsed_resume)
 
+    # Step 5: Predict Role → string
     role = predict_role(parsed_resume)
 
-    # Fixed: pass ats_score and missing_skills as required by suggestion_engine
+    # Step 6: Suggestions → list of strings
     suggestions = generate_suggestions(ats_score, missing_skills)
 
+    # Step 7: Career Path → list of strings
     career = recommend_career(role)
 
     return jsonify({
-        "ATS Score": ats_score,
+        "ATS Score":      ats_score,
         "Matched Skills": matched_skills,
         "Predicted Role": role,
-        "Job Matches": jobs,
+        "Job Matches":    jobs,
         "Present Skills": present_skills,
-        "Skill Gap": missing_skills,
-        "Suggestions": suggestions,
-        "Career Path": career
+        "Skill Gap":      missing_skills,
+        "Suggestions":    suggestions,
+        "Career Path":    career
     })
 
 
