@@ -3,72 +3,84 @@ import os
 import re
 from config import DATASET_FOLDER
 
-# Load real skills dataset from Kaggle
-# The dataset has columns: skill_name, match_term, job_demand_score
+# Core in-demand skills — used as the scoring denominator.
+# Keeping this list focused (not 1869 raw dataset entries) gives
+# meaningful ATS percentages (0-100%) instead of near-zero values.
+CORE_SKILLS = [
+    # Programming languages
+    "python", "java", "javascript", "c++", "c#", "typescript", "r", "go", "swift", "kotlin",
+    # Web
+    "html", "css", "react", "node.js", "angular", "vue", "bootstrap", "jquery",
+    # Backend / APIs
+    "flask", "django", "spring", "express", "rest api", "graphql",
+    # Data & ML
+    "machine learning", "deep learning", "data analysis", "pandas", "numpy",
+    "scikit-learn", "tensorflow", "pytorch", "nlp", "computer vision",
+    # Databases
+    "sql", "mysql", "postgresql", "mongodb", "redis", "sqlite",
+    # DevOps & Cloud
+    "git", "docker", "kubernetes", "aws", "azure", "gcp", "linux", "ci/cd",
+    # Soft skills
+    "communication", "leadership", "teamwork", "problem solving",
+    "project management", "agile", "time management",
+    # Tools
+    "excel", "tableau", "power bi", "figma", "jira", "postman",
+]
+
+# Also load dataset skills for display — but only for matching, not scoring denominator
 try:
     skills_data = pd.read_csv(os.path.join(DATASET_FOLDER, "skills_dataset.csv"))
-
-    # Use match_term for matching, skill_name for display
     if 'match_term' in skills_data.columns:
         skills_data = skills_data.dropna(subset=['match_term'])
-        match_terms  = skills_data['match_term'].tolist()
-        display_names = skills_data['skill_name'].tolist()
+        _dataset_terms  = [str(t).lower().strip() for t in skills_data['match_term'].tolist()]
+        _dataset_names  = skills_data['skill_name'].tolist()
     else:
-        # Fallback if old format
         col = 'skill' if 'skill' in skills_data.columns else skills_data.columns[0]
-        match_terms   = skills_data[col].dropna().tolist()
-        display_names = match_terms
-
-    print(f"[ats_score] Loaded {len(match_terms)} skills from Kaggle dataset")
-
+        _dataset_terms = [str(t).lower().strip() for t in skills_data[col].dropna().tolist()]
+        _dataset_names = _dataset_terms
+    print(f"[ats_score] Loaded {len(_dataset_terms)} skills from dataset (using {len(CORE_SKILLS)} core skills for scoring)")
 except Exception as e:
-    print(f"[ats_score] Could not load dataset, using fallback: {e}")
-    match_terms = [
-        "python", "java", "javascript", "sql", "machine learning", "deep learning",
-        "flask", "django", "react", "node.js", "git", "docker", "kubernetes",
-        "aws", "azure", "tensorflow", "pytorch", "scikit-learn", "pandas", "numpy",
-        "communication", "leadership", "teamwork", "excel", "data analysis",
-        "problem solving", "project management", "agile", "html", "css",
-    ]
-    display_names = match_terms
+    print(f"[ats_score] Dataset not available, using core skills only: {e}")
+    _dataset_terms = []
+    _dataset_names = []
+
+
+def _match_skill(term: str, resume_lower: str) -> bool:
+    """Word-boundary match for short terms to avoid false positives."""
+    if len(term) <= 3:
+        return bool(re.search(r'\b' + re.escape(term) + r'\b', resume_lower))
+    return term in resume_lower
 
 
 def calculate_ats_score(resume_text: str):
     """
-    Scores resume against top in-demand skills from the Kaggle skills dataset.
-
-    Uses match_term for matching (short, clean keywords extracted from full skill names)
-    and displays skill_name (full name) in results.
+    Scores resume against CORE_SKILLS list for a meaningful 0-100% ATS score.
+    Also returns all matched skills (including dataset skills) for display.
 
     Returns:
-        score (float): percentage of high-demand skills found (0-100)
-        matched (list): deduplicated list of matched skill display names
+        score (float): % of core skills found (0-100)
+        matched (list): all matched skill names for display
     """
-    if not match_terms:
-        return 0.0, []
-
     resume_lower = resume_text.lower()
+
+    # Score against core skills (fixed denominator = len(CORE_SKILLS))
+    core_matched = [sk for sk in CORE_SKILLS if _match_skill(sk, resume_lower)]
+    score = round((len(core_matched) / len(CORE_SKILLS)) * 100, 1)
+
+    # Build display list: use dataset names when available, else core matches
+    display_matched = []
     seen = set()
-    matched = []
 
-    for term, name in zip(match_terms, display_names):
-        term_lower = str(term).lower().strip()
+    # First add dataset matches (richer display names)
+    for term, name in zip(_dataset_terms, _dataset_names):
+        if term not in seen and _match_skill(term, resume_lower):
+            display_matched.append(str(name))
+            seen.add(term)
 
-        # Skip duplicates
-        if term_lower in seen:
-            continue
+    # Add any core matches not already covered
+    for sk in core_matched:
+        if sk not in seen:
+            display_matched.append(sk.title())
+            seen.add(sk)
 
-        # Word-boundary matching for short terms (<=3 chars) to avoid false positives
-        # e.g. 'sql' shouldn't match inside 'consultation'
-        if len(term_lower) <= 3:
-            pattern = r'\b' + re.escape(term_lower) + r'\b'
-            found = bool(re.search(pattern, resume_lower))
-        else:
-            found = term_lower in resume_lower
-
-        if found:
-            matched.append(str(name))
-            seen.add(term_lower)
-
-    score = (len(matched) / len(match_terms)) * 100
-    return round(score, 2), matched
+    return score, display_matched

@@ -1,7 +1,6 @@
 import re
 
-# ── Keywords grouped by category ──────────────────────────────────────────
-
+# ── Resume section / content keywords ─────────────────────────────────────
 SECTION_KEYWORDS = [
     "experience", "education", "skills", "summary", "objective",
     "projects", "certifications", "achievements", "internship",
@@ -31,8 +30,7 @@ SOFT_SKILLS = [
 ACTION_VERBS = [
     "developed", "designed", "implemented", "built", "managed",
     "responsible", "led", "collaborated", "achieved", "created",
-    "integrated", "leveraged", "provides", "allows", "features",
-    "secured", "participated", "qualified", "explored",
+    "integrated", "leveraged", "secured", "participated", "qualified",
 ]
 
 CERTIFICATION_KEYWORDS = [
@@ -42,11 +40,20 @@ CERTIFICATION_KEYWORDS = [
 
 # ── Non-resume document signals ───────────────────────────────────────────
 NON_RESUME_KEYWORDS = [
+    # Invoices / financial docs
     "invoice", "bill to", "purchase order", "receipt", "total amount",
     "tax invoice", "order number", "unit price", "quantity",
+    # Letters
     "dear sir", "dear madam", "to whom it may concern", "sincerely yours",
     "yours faithfully", "i am writing to",
-    "abstract", "bibliography", "table of contents", "chapter ",
+    # Academic / institutional documents
+    "academic calendar", "examination schedule", "commencement of classes",
+    "end term examination", "mid term test", "reappear examination",
+    "term ii", "term i", "spring term", "autumn term",
+    "revaluation", "grade sheet", "result publication",
+    # Research papers
+    "abstract", "bibliography", "table of contents",
+    # Other
     "ingredients", "calories", "recipe",
     "patient name", "diagnosis", "prescription", "dosage",
     "balance sheet", "quarterly report", "profit and loss",
@@ -74,7 +81,7 @@ def _count_hits(text_lower: str, keyword_list: list) -> int:
 
 def is_resume(text: str) -> tuple:
     """
-    Validates whether the extracted text looks like a real resume.
+    Validates whether extracted text looks like a real resume.
     Returns (True, "") or (False, reason_string).
     """
     if not text or not isinstance(text, str):
@@ -91,37 +98,36 @@ def is_resume(text: str) -> tuple:
             "Please upload a complete resume."
         )
 
-    # ── 2. Strong non-resume signals ────────────────────────────
+    # ── 2. Strong non-resume signals (threshold = 2 for institutional docs) ─
     non_resume_hits = [kw for kw in NON_RESUME_KEYWORDS if kw in text_lower]
-    if len(non_resume_hits) >= 3:
+    if len(non_resume_hits) >= 2:
         return False, (
             "The uploaded file does not appear to be a resume. "
             f"It looks like a different type of document "
-            f"(detected signals: {', '.join(non_resume_hits[:3])})."
+            f"(detected: {', '.join(non_resume_hits[:3])})."
         )
 
-    # ── 3. Score across multiple categories ─────────────────────
-    section_hits      = _count_hits(text_lower, SECTION_KEYWORDS)
-    education_hits    = _count_hits(text_lower, EDUCATION_KEYWORDS)
-    tech_hits         = _count_hits(text_lower, TECH_SKILLS)
-    soft_hits         = _count_hits(text_lower, SOFT_SKILLS)
-    action_hits       = _count_hits(text_lower, ACTION_VERBS)
-    cert_hits         = _count_hits(text_lower, CERTIFICATION_KEYWORDS)
-    has_contact       = bool(CONTACT_PATTERN.search(text))
-    has_dates         = bool(DATE_PATTERN.search(text))
+    # ── 3. Score across multiple resume-specific categories ─────
+    section_hits   = _count_hits(text_lower, SECTION_KEYWORDS)
+    education_hits = _count_hits(text_lower, EDUCATION_KEYWORDS)
+    tech_hits      = _count_hits(text_lower, TECH_SKILLS)
+    soft_hits      = _count_hits(text_lower, SOFT_SKILLS)
+    action_hits    = _count_hits(text_lower, ACTION_VERBS)
+    cert_hits      = _count_hits(text_lower, CERTIFICATION_KEYWORDS)
+    has_contact    = bool(CONTACT_PATTERN.search(text))
+    has_dates      = bool(DATE_PATTERN.search(text))
 
     score = (
-        min(section_hits, 5)   * 2 +   # max 10 — section headings
-        min(education_hits, 4) * 2 +   # max  8 — education details
-        min(tech_hits, 5)      * 1 +   # max  5 — tech skills
-        min(soft_hits, 3)      * 1 +   # max  3 — soft skills
-        min(action_hits, 4)    * 1 +   # max  4 — action verbs
-        min(cert_hits, 3)      * 1 +   # max  3 — certs/courses
-        (4 if has_contact else 0)   +  # contact info bonus
-        (3 if has_dates else 0)        # date range bonus
+        min(section_hits, 5)   * 2 +
+        min(education_hits, 4) * 2 +
+        min(tech_hits, 5)      * 1 +
+        min(soft_hits, 3)      * 1 +
+        min(action_hits, 4)    * 1 +
+        min(cert_hits, 3)      * 1 +
+        (4 if has_contact else 0) +
+        (3 if has_dates else 0)
     )
 
-    # ── 4. Decision — lowered threshold, fresher-friendly ───────
     if score < 6:
         return False, (
             "The uploaded file does not look like a resume. "
@@ -134,7 +140,6 @@ def is_resume(text: str) -> tuple:
 
 
 def clean_text(text: str) -> str:
-    """Remove extra whitespace and unusual characters."""
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'[^\w\s@.,\-/]', '', text)
     return text.strip()

@@ -2,20 +2,30 @@ import pandas as pd
 import os
 from config import DATASET_FOLDER
 
-# Load real career paths dataset
-try:
-    career_data = pd.read_csv(os.path.join(DATASET_FOLDER, "career_paths.csv"))
-    print(f"[career_path] Loaded {len(career_data)} career path entries")
-    _use_csv = True
+# Load career paths CSV safely
+_use_csv   = False
+career_data = None
 
+try:
+    career_data = pd.read_csv(
+        os.path.join(DATASET_FOLDER, "career_paths.csv"),
+        on_bad_lines='skip',   # skip malformed rows instead of crashing
+        encoding='utf-8'
+    )
+    if 'current_role' in career_data.columns and 'next_role' in career_data.columns:
+        _use_csv = True
+        print(f"[career_path] Loaded {len(career_data)} career path entries")
+    else:
+        print(f"[career_path] CSV missing expected columns, using fallback. Columns found: {list(career_data.columns)}")
 except Exception as e:
     print(f"[career_path] Could not load dataset, using fallback: {e}")
-    _use_csv = False
-    career_data = None
 
-# Fallback map (matches 24 Kaggle categories)
+# ── Fallback career paths (covers all 24 dataset roles + new ones) ─────────
 FALLBACK_PATHS = {
-    "INFORMATION-TECHNOLOGY": ["Senior Developer", "Tech Lead", "Engineering Manager", "CTO"],
+    "WEB-DEVELOPER":           ["Senior Web Developer", "Frontend Lead", "Full Stack Developer", "Engineering Manager"],
+    "SOFTWARE-ENGINEER":       ["Senior Software Engineer", "Tech Lead", "Principal Engineer", "CTO"],
+    "DATA-SCIENCE":            ["Senior Data Scientist", "ML Engineer", "AI Research Lead", "Head of Data"],
+    "INFORMATION-TECHNOLOGY":  ["Senior Developer", "Tech Lead", "Engineering Manager", "CTO"],
     "FINANCE":                 ["Senior Financial Analyst", "Finance Manager", "VP Finance", "CFO"],
     "HR":                      ["HR Manager", "HR Business Partner", "HR Director", "CHRO"],
     "SALES":                   ["Senior Sales Executive", "Sales Manager", "VP Sales", "CSO"],
@@ -43,23 +53,13 @@ FALLBACK_PATHS = {
 
 
 def recommend_career(role: str) -> list:
-    """
-    Returns a list of next career steps for the predicted role.
-    Uses CSV dataset if available, otherwise uses built-in fallback map.
-    """
+    """Returns list of next career steps for the predicted role."""
     if _use_csv and career_data is not None:
         paths = career_data[career_data["current_role"] == role]
         if len(paths) > 0:
             return paths["next_role"].tolist()
 
-    # Fallback
     if role in FALLBACK_PATHS:
         return FALLBACK_PATHS[role]
 
-    # Generic if role not recognized
-    return [
-        f"Senior {role.title()}",
-        "Team Lead",
-        "Manager",
-        "Director"
-    ]
+    return [f"Senior {role.title()}", "Team Lead", "Manager", "Director"]
