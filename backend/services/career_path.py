@@ -1,65 +1,122 @@
+"""
+Run this ONCE to generate a clean career_paths.csv in your datasets folder.
+Usage: python generate_career_paths.py
+It will create: ../datasets/career_paths.csv
+"""
 import pandas as pd
 import os
-from config import DATASET_FOLDER
 
-# Load career paths CSV safely
-_use_csv   = False
-career_data = None
+rows = [
+    # Tech
+    ("WEB-DEVELOPER",          "Senior Web Developer"),
+    ("WEB-DEVELOPER",          "Frontend Lead"),
+    ("WEB-DEVELOPER",          "Full Stack Developer"),
+    ("WEB-DEVELOPER",          "Engineering Manager"),
+    ("SOFTWARE-ENGINEER",      "Senior Software Engineer"),
+    ("SOFTWARE-ENGINEER",      "Tech Lead"),
+    ("SOFTWARE-ENGINEER",      "Principal Engineer"),
+    ("SOFTWARE-ENGINEER",      "CTO"),
+    ("DATA-SCIENCE",           "Senior Data Scientist"),
+    ("DATA-SCIENCE",           "ML Engineer"),
+    ("DATA-SCIENCE",           "AI Research Lead"),
+    ("DATA-SCIENCE",           "Head of Data"),
+    ("INFORMATION-TECHNOLOGY", "Senior Developer"),
+    ("INFORMATION-TECHNOLOGY", "Tech Lead"),
+    ("INFORMATION-TECHNOLOGY", "Engineering Manager"),
+    ("INFORMATION-TECHNOLOGY", "CTO"),
+    # Business
+    ("FINANCE",                "Senior Financial Analyst"),
+    ("FINANCE",                "Finance Manager"),
+    ("FINANCE",                "VP Finance"),
+    ("FINANCE",                "CFO"),
+    ("HR",                     "HR Manager"),
+    ("HR",                     "HR Business Partner"),
+    ("HR",                     "HR Director"),
+    ("HR",                     "CHRO"),
+    ("SALES",                  "Senior Sales Executive"),
+    ("SALES",                  "Sales Manager"),
+    ("SALES",                  "VP Sales"),
+    ("SALES",                  "CSO"),
+    ("BANKING",                "Senior Banker"),
+    ("BANKING",                "Branch Manager"),
+    ("BANKING",                "Regional Director"),
+    ("BANKING",                "Head of Banking"),
+    ("ACCOUNTANT",             "Senior Accountant"),
+    ("ACCOUNTANT",             "Finance Controller"),
+    ("ACCOUNTANT",             "Head of Accounts"),
+    ("ACCOUNTANT",             "CFO"),
+    ("BUSINESS-DEVELOPMENT",   "BD Manager"),
+    ("BUSINESS-DEVELOPMENT",   "VP Business Development"),
+    ("BUSINESS-DEVELOPMENT",   "Chief Growth Officer"),
+    ("CONSULTANT",             "Senior Consultant"),
+    ("CONSULTANT",             "Principal Consultant"),
+    ("CONSULTANT",             "Associate Partner"),
+    ("CONSULTANT",             "Partner"),
+    # Creative / Media
+    ("DESIGNER",               "Senior Designer"),
+    ("DESIGNER",               "Design Lead"),
+    ("DESIGNER",               "Creative Director"),
+    ("DESIGNER",               "VP Design"),
+    ("DIGITAL-MEDIA",          "Senior Media Specialist"),
+    ("DIGITAL-MEDIA",          "Media Manager"),
+    ("DIGITAL-MEDIA",          "Head of Digital"),
+    ("DIGITAL-MEDIA",          "CMO"),
+    ("PUBLIC-RELATIONS",       "Senior PR Specialist"),
+    ("PUBLIC-RELATIONS",       "PR Manager"),
+    ("PUBLIC-RELATIONS",       "Head of PR"),
+    ("PUBLIC-RELATIONS",       "Communications Director"),
+    ("ARTS",                   "Senior Artist"),
+    ("ARTS",                   "Art Director"),
+    ("ARTS",                   "Creative Director"),
+    ("APPAREL",                "Senior Designer"),
+    ("APPAREL",                "Design Manager"),
+    ("APPAREL",                "Brand Director"),
+    # Other
+    ("HEALTHCARE",             "Senior Clinician"),
+    ("HEALTHCARE",             "Medical Supervisor"),
+    ("HEALTHCARE",             "Medical Director"),
+    ("HEALTHCARE",             "CMO"),
+    ("ENGINEERING",            "Senior Engineer"),
+    ("ENGINEERING",            "Lead Engineer"),
+    ("ENGINEERING",            "Engineering Director"),
+    ("ENGINEERING",            "VP Engineering"),
+    ("TEACHER",                "Senior Teacher"),
+    ("TEACHER",                "Head of Department"),
+    ("TEACHER",                "Vice Principal"),
+    ("TEACHER",                "Principal"),
+    ("ADVOCATE",               "Senior Advocate"),
+    ("ADVOCATE",               "Associate Partner"),
+    ("ADVOCATE",               "Partner"),
+    ("ADVOCATE",               "Legal Director"),
+    ("AVIATION",               "Senior Pilot"),
+    ("AVIATION",               "Chief Pilot"),
+    ("AVIATION",               "Flight Operations Manager"),
+    ("AVIATION",               "Director of Operations"),
+    ("CONSTRUCTION",           "Site Manager"),
+    ("CONSTRUCTION",           "Project Manager"),
+    ("CONSTRUCTION",           "Construction Director"),
+    ("AUTOMOBILE",             "Senior Technician"),
+    ("AUTOMOBILE",             "Service Manager"),
+    ("AUTOMOBILE",             "Regional Director"),
+    ("BPO",                    "Team Lead"),
+    ("BPO",                    "Operations Manager"),
+    ("BPO",                    "Senior Manager"),
+    ("BPO",                    "VP Operations"),
+    ("AGRICULTURE",            "Senior Agronomist"),
+    ("AGRICULTURE",            "Farm Manager"),
+    ("AGRICULTURE",            "Regional Agricultural Director"),
+    ("FITNESS",                "Senior Trainer"),
+    ("FITNESS",                "Fitness Manager"),
+    ("FITNESS",                "Regional Wellness Manager"),
+    ("CHEF",                   "Sous Chef"),
+    ("CHEF",                   "Head Chef"),
+    ("CHEF",                   "Executive Chef"),
+    ("CHEF",                   "F&B Director"),
+]
 
-try:
-    career_data = pd.read_csv(
-        os.path.join(DATASET_FOLDER, "career_paths.csv"),
-        on_bad_lines='skip',   # skip malformed rows instead of crashing
-        encoding='utf-8'
-    )
-    if 'current_role' in career_data.columns and 'next_role' in career_data.columns:
-        _use_csv = True
-        print(f"[career_path] Loaded {len(career_data)} career path entries")
-    else:
-        print(f"[career_path] CSV missing expected columns, using fallback. Columns found: {list(career_data.columns)}")
-except Exception as e:
-    print(f"[career_path] Could not load dataset, using fallback: {e}")
+df = pd.DataFrame(rows, columns=["current_role", "next_role"])
 
-# ── Fallback career paths (covers all 24 dataset roles + new ones) ─────────
-FALLBACK_PATHS = {
-    "WEB-DEVELOPER":           ["Senior Web Developer", "Frontend Lead", "Full Stack Developer", "Engineering Manager"],
-    "SOFTWARE-ENGINEER":       ["Senior Software Engineer", "Tech Lead", "Principal Engineer", "CTO"],
-    "DATA-SCIENCE":            ["Senior Data Scientist", "ML Engineer", "AI Research Lead", "Head of Data"],
-    "INFORMATION-TECHNOLOGY":  ["Senior Developer", "Tech Lead", "Engineering Manager", "CTO"],
-    "FINANCE":                 ["Senior Financial Analyst", "Finance Manager", "VP Finance", "CFO"],
-    "HR":                      ["HR Manager", "HR Business Partner", "HR Director", "CHRO"],
-    "SALES":                   ["Senior Sales Executive", "Sales Manager", "VP Sales", "CSO"],
-    "HEALTHCARE":              ["Senior Clinician", "Medical Supervisor", "Medical Director", "CMO"],
-    "ENGINEERING":             ["Senior Engineer", "Lead Engineer", "Engineering Director", "VP Engineering"],
-    "TEACHER":                 ["Senior Teacher", "Head of Department", "Vice Principal", "Principal"],
-    "BANKING":                 ["Senior Banker", "Branch Manager", "Regional Director", "Head of Banking"],
-    "ACCOUNTANT":              ["Senior Accountant", "Finance Controller", "Head of Accounts", "CFO"],
-    "BUSINESS-DEVELOPMENT":    ["BD Manager", "VP Business Development", "Chief Growth Officer"],
-    "CONSULTANT":              ["Senior Consultant", "Principal Consultant", "Associate Partner", "Partner"],
-    "DESIGNER":                ["Senior Designer", "Design Lead", "Creative Director", "VP Design"],
-    "DIGITAL-MEDIA":           ["Senior Media Specialist", "Media Manager", "Head of Digital", "CMO"],
-    "ADVOCATE":                ["Senior Advocate", "Associate Partner", "Partner", "Legal Director"],
-    "AVIATION":                ["Senior Pilot", "Chief Pilot", "Flight Operations Manager", "Director of Operations"],
-    "CONSTRUCTION":            ["Site Manager", "Project Manager", "Construction Director", "VP Construction"],
-    "AUTOMOBILE":              ["Senior Technician", "Service Manager", "Regional Director"],
-    "BPO":                     ["Team Lead", "Operations Manager", "Senior Manager", "VP Operations"],
-    "AGRICULTURE":             ["Senior Agronomist", "Farm Manager", "Regional Agricultural Director"],
-    "FITNESS":                 ["Senior Trainer", "Fitness Manager", "Regional Wellness Manager"],
-    "CHEF":                    ["Sous Chef", "Head Chef", "Executive Chef", "F&B Director"],
-    "APPAREL":                 ["Senior Designer", "Design Manager", "Design Director", "Brand Director"],
-    "ARTS":                    ["Senior Artist", "Art Director", "Creative Director", "VP Creative"],
-    "PUBLIC-RELATIONS":        ["Senior PR Specialist", "PR Manager", "Head of PR", "Communications Director"],
-}
-
-
-def recommend_career(role: str) -> list:
-    """Returns list of next career steps for the predicted role."""
-    if _use_csv and career_data is not None:
-        paths = career_data[career_data["current_role"] == role]
-        if len(paths) > 0:
-            return paths["next_role"].tolist()
-
-    if role in FALLBACK_PATHS:
-        return FALLBACK_PATHS[role]
-
-    return [f"Senior {role.title()}", "Team Lead", "Manager", "Director"]
+out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "datasets", "career_paths.csv")
+out_path = os.path.normpath(out_path)
+df.to_csv(out_path, index=False)
+print(f"✅ Generated {len(df)} career path rows → {out_path}")
