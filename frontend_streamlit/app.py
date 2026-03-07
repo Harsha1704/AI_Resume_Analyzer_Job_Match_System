@@ -42,7 +42,7 @@ if uploaded_file is not None:
             response = requests.post(
                 API_URL,
                 json={"resume_text": resume_text},
-                timeout=30
+                timeout=120
             )
         except requests.exceptions.ConnectionError:
             st.error("❌ Cannot connect to backend. Make sure Flask is running.")
