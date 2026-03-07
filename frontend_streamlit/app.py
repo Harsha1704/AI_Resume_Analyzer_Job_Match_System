@@ -1,6 +1,9 @@
 import streamlit as st
 import requests
 import pdfplumber
+from PIL import Image
+import pytesseract
+import io
 
 API_URL      = "http://127.0.0.1:5000/analyze"
 VALIDATE_URL = "http://127.0.0.1:5000/validate"
@@ -12,18 +15,18 @@ st.caption("Powered by Machine Learning | Trained on 2484 Real Resumes across 24
 st.write("Upload your resume to get ATS score, skill gap analysis, job matches and career path.")
 
 # ── Session state init ─────────────────────────────────────────────────────
-if "last_file_name" not in st.session_state:
-    st.session_state.last_file_name = None
-if "validation_result" not in st.session_state:
-    st.session_state.validation_result = None   # True / False
-if "validation_reason" not in st.session_state:
-    st.session_state.validation_reason = ""
-if "analysis_result" not in st.session_state:
-    st.session_state.analysis_result = None
-if "resume_text" not in st.session_state:
-    st.session_state.resume_text = ""
+for key, default in {
+    "last_file_name":    None,
+    "validation_result": None,
+    "validation_reason": "",
+    "analysis_result":   None,
+    "resume_text":       "",
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
+# ── Text extraction helpers ────────────────────────────────────────────────
 def extract_text_from_pdf(file) -> str:
     text = ""
     with pdfplumber.open(file) as pdf:
@@ -34,6 +37,27 @@ def extract_text_from_pdf(file) -> str:
     return text.strip()
 
 
+def extract_text_from_image(file) -> str:
+    """Use OCR (Tesseract) to extract text from a resume image."""
+    try:
+        image = Image.open(file)
+        # Convert to RGB if needed (handles RGBA PNGs etc.)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        text = pytesseract.image_to_string(image, lang="eng")
+        return text.strip()
+    except Exception as e:
+        return ""
+
+
+def extract_text(file, file_type: str) -> str:
+    if file_type == "pdf":
+        return extract_text_from_pdf(file)
+    else:
+        return extract_text_from_image(file)
+
+
+# ── Error UI ───────────────────────────────────────────────────────────────
 def show_invalid_resume_error(reason: str):
     st.error("❌ Invalid File — This doesn't appear to be a resume.")
     st.markdown(
@@ -58,17 +82,17 @@ def show_invalid_resume_error(reason: str):
     with cols[1]:
         st.info("🎓 **Education**\nDegree, university, graduation year")
     with cols[2]:
-        st.info("💼 **Experience**\nJob titles, companies, dates")
+        st.info("💼 **Experience / Projects**\nJob titles, companies, or projects")
     cols2 = st.columns(3)
     with cols2[0]:
         st.info("🛠️ **Skills**\nTechnical & soft skills")
     with cols2[1]:
         st.info("📁 **Projects / Certifications**\nRelevant work samples")
     with cols2[2]:
-        st.info("📝 **Text-based PDF**\nNot a scanned image")
+        st.info("📝 **Clear text**\nNot a blurry/low-res scan")
     st.warning(
         "💡 **Tip:** Make sure you are uploading your **resume/CV** and not "
-        "an invoice, letter, article, certificate, or any other document."
+        "an invoice, letter, academic calendar, or any other document."
     )
 
 
@@ -79,33 +103,61 @@ def safe_json(response):
         return None
 
 
-# ── File uploader ──────────────────────────────────────────────────────────
-uploaded_file = st.file_uploader("📄 Upload Resume (PDF only)", type=["pdf"])
+# ── File uploader — PDF + Images ──────────────────────────────────────────
+st.markdown("#### 📎 Supported formats: PDF, JPG, JPEG, PNG")
 
-# ── Detect new file upload → reset all state ──────────────────────────────
+uploaded_file = st.file_uploader(
+    "Upload Resume",
+    type=["pdf", "jpg", "jpeg", "png"],
+    label_visibility="collapsed"
+)
+
+# ── Detect file type ───────────────────────────────────────────────────────
 if uploaded_file is not None:
-    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+    fname_lower = uploaded_file.name.lower()
+    if fname_lower.endswith(".pdf"):
+        file_type = "pdf"
+        file_icon = "📄"
+        file_label = "PDF"
+    else:
+        file_type = "image"
+        file_icon = "🖼️"
+        file_label = "Image"
 
+    st.caption(f"{file_icon} Uploaded as **{file_label}**: `{uploaded_file.name}`")
+
+    # ── Detect new file → reset state ─────────────────────────
+    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
     if st.session_state.last_file_name != current_file_id:
-        # New file detected — wipe previous results completely
         st.session_state.last_file_name    = current_file_id
         st.session_state.validation_result = None
         st.session_state.validation_reason = ""
         st.session_state.analysis_result   = None
         st.session_state.resume_text       = ""
 
-    # ── Step 1: Extract text (only if not already done for this file) ──────
+    # ── Step 1: Extract text ───────────────────────────────────
     if not st.session_state.resume_text:
-        with st.spinner("📖 Extracting text from PDF..."):
-            st.session_state.resume_text = extract_text_from_pdf(uploaded_file)
+        spinner_msg = "📖 Extracting text from PDF..." if file_type == "pdf" else "🔍 Running OCR on image..."
+        with st.spinner(spinner_msg):
+            st.session_state.resume_text = extract_text(uploaded_file, file_type)
 
     resume_text = st.session_state.resume_text
 
     if len(resume_text.strip()) < 20:
-        st.error("❌ Could not extract text. Make sure it's a text-based PDF, not a scanned image.")
+        if file_type == "image":
+            st.error(
+                "❌ Could not extract text from the image. "
+                "Make sure the image is clear, well-lit, and not blurry. "
+                "Try a higher resolution scan or photo."
+            )
+        else:
+            st.error(
+                "❌ Could not extract text from PDF. "
+                "Make sure it's a text-based PDF, not a scanned image."
+            )
         st.stop()
 
-    # ── Step 2: Validate (only if not already done for this file) ──────────
+    # ── Step 2: Validate via backend ──────────────────────────
     if st.session_state.validation_result is None:
         with st.spinner("🔍 Validating document..."):
             try:
@@ -117,9 +169,8 @@ if uploaded_file is not None:
                 val_data = safe_json(val_response) or {}
                 st.session_state.validation_result = (val_response.status_code == 200)
                 st.session_state.validation_reason = val_data.get("error", "")
-
             except requests.exceptions.ConnectionError:
-                st.error("❌ Cannot connect to backend. Make sure the updated Flask app.py is running.")
+                st.error("❌ Cannot connect to backend. Make sure Flask is running.")
                 st.code("cd backend && python app.py", language="bash")
                 st.stop()
             except Exception as e:
@@ -127,21 +178,28 @@ if uploaded_file is not None:
                 st.write(e)
                 st.stop()
 
-    # ── Step 3: Show error if invalid ──────────────────────────────────────
+    # ── Step 3: Show error if invalid ─────────────────────────
     if not st.session_state.validation_result:
         show_invalid_resume_error(
             st.session_state.validation_reason or
             "The uploaded file does not appear to be a resume. "
-            "Please upload a proper resume/CV in PDF format."
+            "Please upload a proper resume/CV."
         )
         st.stop()
 
-    # ── Step 4: Run analysis (only if not already done for this file) ──────
-    st.success("✅ Resume Validated Successfully!")
+    # ── Step 4: Valid — show preview ───────────────────────────
+    st.success(f"✅ Resume Validated Successfully! ({file_label} uploaded)")
+
+    # Show image preview for image uploads
+    if file_type == "image":
+        with st.expander(f"🖼️ Preview Uploaded Image"):
+            uploaded_file.seek(0)
+            st.image(uploaded_file, caption=uploaded_file.name, use_column_width=True)
 
     with st.expander("📄 Preview Extracted Text"):
         st.write(resume_text[:800] + "..." if len(resume_text) > 800 else resume_text)
 
+    # ── Step 5: Full analysis ──────────────────────────────────
     if st.session_state.analysis_result is None:
         with st.spinner("🧠 Analyzing with AI Engine..."):
             try:
@@ -162,8 +220,7 @@ if uploaded_file is not None:
         result = safe_json(response)
 
         if response.status_code == 422:
-            reason = (result or {}).get("error", "Invalid resume.")
-            show_invalid_resume_error(reason)
+            show_invalid_resume_error((result or {}).get("error", "Invalid resume."))
             st.stop()
         elif response.status_code != 200 or result is None:
             st.error(f"❌ Backend error {response.status_code}")
@@ -176,7 +233,7 @@ if uploaded_file is not None:
     st.success("✅ Analysis Complete!")
     st.divider()
 
-    # ── Row 1: ATS Score + Predicted Role ────────────────────────
+    # ── Row 1: ATS Score + Predicted Role ─────────────────────
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📊 ATS Score")
@@ -198,14 +255,14 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # ── Row 2: Job Matches ────────────────────────────────────────
+    # ── Row 2: Job Matches ─────────────────────────────────────
     st.subheader("💼 Top Job Matches")
     job_matches = result.get("Job Matches", [])
     if not job_matches:
         st.write("No job matches found.")
     else:
-        cols = st.columns(len(job_matches))
-        for i, job in enumerate(job_matches):
+        cols = st.columns(min(len(job_matches), 5))
+        for i, job in enumerate(job_matches[:5]):
             with cols[i]:
                 title     = job.get("job_title", "Unknown") if isinstance(job, dict) else str(job)
                 score_val = job.get("score", 0)             if isinstance(job, dict) else 0
@@ -213,7 +270,7 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # ── Row 3: Skills ─────────────────────────────────────────────
+    # ── Row 3: Skills ──────────────────────────────────────────
     col3, col4 = st.columns(2)
     with col3:
         st.subheader("✅ Skills Found in Resume")
@@ -234,17 +291,16 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # ── Row 4: Suggestions ────────────────────────────────────────
+    # ── Row 4: Suggestions ─────────────────────────────────────
     st.subheader("💡 Resume Improvement Suggestions")
     for tip in result.get("Suggestions", []):
         st.write(tip)
 
     st.divider()
 
-    # ── Row 5: Career Path ────────────────────────────────────────
+    # ── Row 5: Career Path ─────────────────────────────────────
     st.subheader("🚀 Recommended Career Path")
     career = result.get("Career Path", [])
     if career:
-        path_display = f"**{role}** → " + " → ".join(career)
-        st.write(path_display)
+        st.write(f"**{role}** → " + " → ".join(career))
         st.caption("Based on industry career progression data")
