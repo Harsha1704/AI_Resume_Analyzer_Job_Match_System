@@ -6,13 +6,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from services.resume_parser import parse_resume, is_resume
-from services.ats_score import calculate_ats_score
-from services.job_matcher import match_jobs
-from services.skill_gap import detect_skill_gap
-from services.role_predictor import predict_role
+from services.resume_parser    import parse_resume, is_resume
+from services.ats_score        import calculate_ats_score
+from services.job_matcher      import match_jobs
+from services.skill_gap        import detect_skill_gap
+from services.role_predictor   import predict_role
 from services.suggestion_engine import generate_suggestions
-from services.career_path import recommend_career
+from services.career_path      import recommend_career
 
 app = Flask(__name__)
 CORS(app)
@@ -45,12 +45,12 @@ def analyze_resume():
     if not resume_text:
         return jsonify({"error": "resume_text missing"}), 400
 
-    # Validate first
+    # Guard: validate first
     valid, reason = is_resume(resume_text)
     if not valid:
         return jsonify({"error": reason}), 422
 
-    # Step 1: Clean
+    # Step 1: Clean text
     parsed_resume = parse_resume(resume_text)
 
     # Step 2: ATS Score
@@ -59,13 +59,13 @@ def analyze_resume():
     # Step 3: Job Matches
     jobs = match_jobs(parsed_resume)
 
-    # Step 4: Skill Gap
-    present_skills, missing_skills = detect_skill_gap(parsed_resume)
-
-    # Step 5: Predict Role
+    # Step 4: Predict Role first (needed for skill gap prioritization)
     role = predict_role(parsed_resume)
 
-    # Step 6: Suggestions — pass resume_text so it can check existing links
+    # Step 5: Skill Gap — pass role so missing skills are role-relevant
+    present_skills, missing_skills = detect_skill_gap(parsed_resume, predicted_role=role)
+
+    # Step 6: Suggestions — fully dynamic based on resume content
     suggestions = generate_suggestions(ats_score, missing_skills, parsed_resume)
 
     # Step 7: Career Path
