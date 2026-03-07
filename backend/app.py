@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from services.resume_parser import parse_resume
+from services.resume_parser import parse_resume, is_resume
 from services.ats_score import calculate_ats_score
 from services.job_matcher import match_jobs
 from services.skill_gap import detect_skill_gap
@@ -24,6 +24,31 @@ def home():
     return "AI Resume Analyzer Backend Running Successfully 🚀"
 
 
+@app.route("/validate", methods=["POST"])
+def validate_resume():
+    """
+    Lightweight endpoint — only checks if the uploaded text is a real resume.
+    Frontend can call this first before /analyze for faster feedback.
+
+    Request body: { "resume_text": "..." }
+    Response:
+        200 → { "is_valid": true }
+        400 → { "is_valid": false, "error": "Human-readable reason" }
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"is_valid": False, "error": "No JSON received."}), 400
+
+    resume_text = data.get("resume_text", "")
+    valid, reason = is_resume(resume_text)
+
+    if not valid:
+        return jsonify({"is_valid": False, "error": reason}), 400
+
+    return jsonify({"is_valid": True}), 200
+
+
 @app.route("/analyze", methods=["POST"])
 def analyze_resume():
 
@@ -36,6 +61,11 @@ def analyze_resume():
 
     if not resume_text:
         return jsonify({"error": "resume_text missing"}), 400
+
+    # ── Guard: validate before doing heavy analysis ──────────────
+    valid, reason = is_resume(resume_text)
+    if not valid:
+        return jsonify({"error": reason}), 422   # 422 Unprocessable Entity
 
     # Step 1: Clean resume text
     parsed_resume = parse_resume(resume_text)
