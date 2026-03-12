@@ -96,16 +96,14 @@ def extract_skills(text: str):
 
     text_lower = text.lower()
 
-    found_skills = []
+    found_skills = set()
 
     for skill in CORE_SKILLS:
 
         if _match_skill(skill, text_lower):
-            found_skills.append(skill)
+            found_skills.add(skill)
 
-    return list(set(found_skills))
-
-
+    return list(found_skills)
 # ------------------------------------------------------------
 # ATS SCORE CALCULATION (Industry Style)
 # ------------------------------------------------------------
