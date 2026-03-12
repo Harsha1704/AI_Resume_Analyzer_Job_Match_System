@@ -12,7 +12,13 @@ VALIDATE_URL = "http://127.0.0.1:5000/validate"
 
 st.set_page_config(page_title="ResumeAI Pro", page_icon="🧠",
                    layout="wide", initial_sidebar_state="expanded")
+import streamlit as st
 
+st.set_page_config(
+    page_title="AI Resume Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 # ═══════════════════════════════════════════════════════════════
 #  GLOBAL CSS
 # ═══════════════════════════════════════════════════════════════
