@@ -300,7 +300,7 @@ with st.sidebar:
             pid, label = item
             locked = (not has_result()) and pid != "upload"
             icon = "🔒 " if locked else ""
-            if st.button(f"{icon}{label}", key=f"nav_{pid}", disabled=locked, use_container_width=True):
+            if st.button(f"{icon}{label}", key=f"nav_{pid}", disabled=locked, width="stretch"):
                 go_page(pid)
 
     st.markdown("""
@@ -466,7 +466,7 @@ elif st.session_state.page=="ats" and has_result():
         ))
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
                           font={"color":"#ddddf5"},height=250,margin=dict(t=20,b=5,l=10,r=10))
-        st.plotly_chart(fig,use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         st.markdown(f'<p style="text-align:center;font-size:0.85rem;font-weight:600;color:{ats_color(score)};margin-top:-0.8rem;">{ats_label(score)}</p>', unsafe_allow_html=True)
 
     with bc:
@@ -550,7 +550,7 @@ elif st.session_state.page=="skills" and has_result():
                 yaxis=dict(showgrid=False,zeroline=False,tickfont=dict(color="#8080a8",size=11),autorange="reversed"),
                 margin=dict(t=5,b=5,l=5,r=95),height=max(180,len(top8)*34),bargap=0.42,
             )
-            st.plotly_chart(fig_sk,use_container_width=True)
+            st.plotly_chart(fig_sk,width="stretch")
 
     with sc2:
         st.markdown(f'<div class="sh">❗ Skill Gaps <span style="color:#f87171;font-family:Syne,sans-serif;font-size:0.9rem;font-weight:800;margin-left:0.5rem;">{len(miss)}</span></div>', unsafe_allow_html=True)
@@ -602,7 +602,7 @@ elif st.session_state.page=="jobs" and has_result():
             yaxis=dict(showgrid=False,zeroline=False,tickfont=dict(color="#9090b8",size=13),autorange="reversed"),
             margin=dict(t=10,b=10,l=10,r=70),height=max(260,len(jobs_s)*52),bargap=0.38,
         )
-        st.plotly_chart(fig_j,use_container_width=True)
+        st.plotly_chart(fig_j,width="stretch")
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
         st.markdown('<div class="sh">📋 Job Match Details</div>', unsafe_allow_html=True)
@@ -684,7 +684,7 @@ elif st.session_state.page=="career" and has_result():
         yaxis=dict(showgrid=False,zeroline=False,tickfont=dict(color="#8080a8",size=11),autorange="reversed"),
         margin=dict(t=5,b=5,l=5,r=60),height=280,bargap=0.38,
     )
-    st.plotly_chart(fig_d,use_container_width=True)
+    st.plotly_chart(fig_d,width="stretch")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -856,7 +856,7 @@ elif st.session_state.page=="analytics" and has_result():
             annotations=[dict(text=f"<b>{len(pres)}</b><br>skills",x=0.5,y=0.5,
                              font=dict(size=16,color="#ddddf5",family="Syne"),showarrow=False)]
         )
-        st.plotly_chart(fig_p,use_container_width=True)
+        st.plotly_chart(fig_p,width="stretch")
 
     with ch2:
         st.markdown('<div class="sh">📡 Resume Quality Radar</div>', unsafe_allow_html=True)
@@ -878,7 +878,7 @@ elif st.session_state.page=="analytics" and has_result():
             paper_bgcolor="rgba(0,0,0,0)",showlegend=False,
             margin=dict(t=20,b=20,l=30,r=30),height=250,
         )
-        st.plotly_chart(fig_r,use_container_width=True)
+        st.plotly_chart(fig_r,width="stretch")
 
     # Job match chart
     if jobs:
@@ -898,7 +898,7 @@ elif st.session_state.page=="analytics" and has_result():
             yaxis=dict(range=[0,130],showgrid=False,zeroline=False,showticklabels=False),
             margin=dict(t=30,b=10,l=10,r=10),height=260,bargap=0.35,
         )
-        st.plotly_chart(fig_jb,use_container_width=True)
+        st.plotly_chart(fig_jb,width="stretch")
 
 
 # ═══════════════════════════════════════════════════════════════
