@@ -1,11 +1,19 @@
 import pandas as pd
 import re
 import pickle
+import os
 
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+import nltk
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import stopwords
+
+nltk.download("wordnet")
+nltk.download("stopwords")
 
 
 # =========================
@@ -21,15 +29,19 @@ print(data["Category"].value_counts())
 # =========================
 # 2️⃣ Select Columns
 # =========================
-X = data["Resume_html"].astype(str)   # Use HTML column
+X = data["Resume_html"].astype(str)
 y = data["Category"]
 
 
 # =========================
-# 3️⃣ Clean Text Function
+# 3️⃣ NLP Preprocessing
 # =========================
+lemmatizer = WordNetLemmatizer()
+stop_words = set(stopwords.words("english"))
+
 def clean_text(text):
-    # Remove HTML tags
+
+    # Remove HTML
     text = re.sub(r'<.*?>', ' ', text)
 
     # Remove URLs
@@ -38,18 +50,24 @@ def clean_text(text):
     # Remove emails
     text = re.sub(r"\S+@\S+", "", text)
 
-    # Remove special characters and numbers
+    # Remove special characters
     text = re.sub(r"[^a-zA-Z ]", " ", text)
 
-    # Convert to lowercase
     text = text.lower()
 
-    # Remove extra spaces
-    text = re.sub(r"\s+", " ", text).strip()
+    words = text.split()
 
-    return text
+    # Remove stopwords + lemmatize
+    words = [
+        lemmatizer.lemmatize(word)
+        for word in words
+        if word not in stop_words
+    ]
+
+    return " ".join(words)
 
 
+print("\nCleaning Resume Text...")
 X = X.apply(clean_text)
 
 
@@ -57,18 +75,17 @@ X = X.apply(clean_text)
 # 4️⃣ TF-IDF Vectorization
 # =========================
 vectorizer = TfidfVectorizer(
-    stop_words="english",
-    max_features=50000,
-    ngram_range=(1, 3),   # Unigram + Bigram + Trigram
+    max_features=60000,
+    ngram_range=(1,3),
     min_df=2,
-    max_df=0.85
+    max_df=0.9
 )
 
 X_vectorized = vectorizer.fit_transform(X)
 
 
 # =========================
-# 5️⃣ Train-Test Split
+# 5️⃣ Train/Test Split
 # =========================
 X_train, X_test, y_train, y_test = train_test_split(
     X_vectorized,
@@ -82,27 +99,35 @@ X_train, X_test, y_train, y_test = train_test_split(
 # =========================
 # 6️⃣ Train Model
 # =========================
+print("\nTraining Model...")
+
 model = LinearSVC(class_weight="balanced")
 
 model.fit(X_train, y_train)
 
 
 # =========================
-# 7️⃣ Evaluation
+# 7️⃣ Model Evaluation
 # =========================
 y_pred = model.predict(X_test)
 
 accuracy = accuracy_score(y_test, y_pred)
 
 print("\n🔥 Final Accuracy:", accuracy)
+
 print("\n📊 Classification Report:\n")
 print(classification_report(y_test, y_pred))
 
+print("\n🧠 Confusion Matrix:\n")
+print(confusion_matrix(y_test, y_pred))
+
 
 # =========================
-# 8️⃣ Save Model + Vectorizer
+# 8️⃣ Save Model
 # =========================
-pickle.dump(model, open("model.pkl", "wb"))
-pickle.dump(vectorizer, open("vectorizer.pkl", "wb"))
+os.makedirs("backend/models", exist_ok=True)
+
+pickle.dump(model, open("backend/models/role_prediction.pkl", "wb"))
+pickle.dump(vectorizer, open("backend/models/tfidf_vectorizer.pkl", "wb"))
 
 print("\n✅ Model and Vectorizer Saved Successfully!")
