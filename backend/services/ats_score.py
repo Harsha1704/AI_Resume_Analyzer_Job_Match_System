@@ -1,145 +1,167 @@
-import pandas as pd
-import os
 import re
-from config import DATASET_FOLDER
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 
-# Load semantic model
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
+# ==============================
+# SKILL DATABASE
+# ==============================
 
 CORE_SKILLS = [
-    "python","java","javascript","c++","c#","typescript","r","go",
-    "html","css","react","node.js","angular","vue","bootstrap",
-    "flask","django","spring","express","rest api","graphql",
-    "machine learning","deep learning","data analysis",
-    "pandas","numpy","scikit-learn","tensorflow","pytorch","nlp",
-    "sql","mysql","postgresql","mongodb","redis","sqlite",
-    "git","docker","kubernetes","aws","azure","gcp","linux",
-    "communication","leadership","teamwork","problem solving",
-    "project management","agile","time management",
-    "excel","tableau","power bi","figma","jira","postman"
+    "python","java","c++","sql","machine learning","deep learning",
+    "data science","nlp","computer vision","pandas","numpy",
+    "tensorflow","pytorch","scikit-learn","flask","django",
+    "react","node","docker","kubernetes","aws","git"
+]
+
+TOOLS = [
+    "docker","kubernetes","aws","azure","gcp",
+    "tableau","powerbi","git","linux","spark"
+]
+
+EDUCATION = [
+    "btech","b.tech","mtech","m.tech","bachelor",
+    "master","phd","computer science","information technology"
 ]
 
 
-# ---------------------------------------------------
-# Load dataset skills (optional enhancement)
-# ---------------------------------------------------
-try:
+# ==============================
+# TEXT CLEANING
+# ==============================
 
-    skills_data = pd.read_csv(os.path.join(DATASET_FOLDER,"skills_dataset.csv"))
-
-    if "match_term" in skills_data.columns:
-        skills_data = skills_data.dropna(subset=["match_term"])
-
-        _dataset_terms = [
-            str(x).lower().strip()
-            for x in skills_data["match_term"].tolist()
-        ]
-
-        _dataset_names = skills_data["skill_name"].tolist()
-
-    else:
-        col = skills_data.columns[0]
-
-        _dataset_terms = [
-            str(x).lower().strip()
-            for x in skills_data[col].dropna().tolist()
-        ]
-
-        _dataset_names = _dataset_terms
-
-except Exception:
-
-    _dataset_terms = []
-    _dataset_names = []
-
-
-# ---------------------------------------------------
-# Skill matching
-# ---------------------------------------------------
-def _match_skill(skill, text):
-
-    if len(skill) <= 3:
-        return bool(re.search(r'\b'+re.escape(skill)+r'\b', text))
-
-    return skill in text
-
-
-# ---------------------------------------------------
-# Extract skills
-# ---------------------------------------------------
-def extract_skills(text):
-
+def clean_text(text):
     text = text.lower()
-
-    skills = set()
-
-    for skill in CORE_SKILLS:
-        if _match_skill(skill, text):
-            skills.add(skill)
-
-    return list(skills)
+    text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text)
+    return text
 
 
-# ---------------------------------------------------
-# Semantic similarity score
-# ---------------------------------------------------
-def semantic_similarity(resume_text, job_description):
+# ==============================
+# SKILL EXTRACTION
+# ==============================
 
-    emb1 = model.encode([resume_text])
-    emb2 = model.encode([job_description])
+def extract_items(text, database):
+    found = []
+    for item in database:
+        if item in text:
+            found.append(item)
+    return list(set(found))
 
-    sim = cosine_similarity(emb1, emb2)[0][0]
 
-    return sim * 100
+# ==============================
+# EXPERIENCE DETECTION
+# ==============================
+
+def detect_experience(text):
+
+    exp_patterns = [
+        r'\d+\s+years',
+        r'\d+\s+year',
+        r'\d+\s+months'
+    ]
+
+    exp_score = 0
+
+    for pattern in exp_patterns:
+        if re.search(pattern, text):
+            exp_score = 100
+            break
+
+    return exp_score
 
 
-# ---------------------------------------------------
-# ADVANCED ATS SCORE
-# ---------------------------------------------------
+# ==============================
+# KEYWORD DENSITY SCORE
+# ==============================
+
+def keyword_score(resume, jd):
+
+    resume_words = resume.split()
+    jd_words = jd.split()
+
+    match_count = 0
+
+    for word in jd_words:
+        if word in resume_words:
+            match_count += 1
+
+    if len(jd_words) == 0:
+        return 0
+
+    score = (match_count / len(jd_words)) * 100
+    return round(score,2)
+
+
+# ==============================
+# MAIN ATS FUNCTION
+# ==============================
+
 def calculate_ats_score(resume_text, job_description):
 
-    resume_lower = resume_text.lower()
-    jd_lower = job_description.lower()
+    resume = clean_text(resume_text)
+    jd = clean_text(job_description)
 
-    resume_skills = extract_skills(resume_lower)
-    jd_skills = extract_skills(jd_lower)
+    # Skill extraction
+    resume_skills = extract_items(resume, CORE_SKILLS)
+    jd_skills = extract_items(jd, CORE_SKILLS)
 
-    if len(jd_skills) == 0:
-        return 0, [], [], resume_skills
+    matched_skills = list(set(resume_skills) & set(jd_skills))
 
-    matched = list(set(resume_skills) & set(jd_skills))
-    missing = list(set(jd_skills) - set(resume_skills))
-
-    skill_score = (len(matched)/len(jd_skills))*100
-
-    semantic_score = semantic_similarity(resume_text,job_description)
-
-    # Weighted ATS score
-    ats_score = round((0.6*skill_score)+(0.4*semantic_score),1)
-
-    return ats_score, matched, missing, resume_skills
+    if len(jd_skills) > 0:
+        skill_score = (len(matched_skills) / len(jd_skills)) * 100
+    else:
+        skill_score = 0
 
 
-# ---------------------------------------------------
-# Display all resume skills
-# ---------------------------------------------------
-def get_display_skills(resume_text):
+    # Tool matching
+    resume_tools = extract_items(resume, TOOLS)
+    jd_tools = extract_items(jd, TOOLS)
 
-    resume_lower = resume_text.lower()
+    matched_tools = list(set(resume_tools) & set(jd_tools))
 
-    skills = set()
+    if len(jd_tools) > 0:
+        tool_score = (len(matched_tools) / len(jd_tools)) * 100
+    else:
+        tool_score = 0
 
-    for term,name in zip(_dataset_terms,_dataset_names):
 
-        if _match_skill(term,resume_lower):
-            skills.add(name)
+    # Education matching
+    resume_edu = extract_items(resume, EDUCATION)
+    jd_edu = extract_items(jd, EDUCATION)
 
-    for skill in CORE_SKILLS:
+    matched_edu = list(set(resume_edu) & set(jd_edu))
 
-        if _match_skill(skill,resume_lower):
-            skills.add(skill.title())
+    if len(jd_edu) > 0:
+        edu_score = (len(matched_edu) / len(jd_edu)) * 100
+    else:
+        edu_score = 50   # default
 
-    return list(skills)
+
+    # Experience score
+    exp_score = detect_experience(resume)
+
+
+    # Keyword score
+    key_score = keyword_score(resume, jd)
+
+
+    # ==========================
+    # FINAL ATS SCORE
+    # ==========================
+
+    final_score = (
+        skill_score * 0.40 +
+        tool_score * 0.15 +
+        key_score * 0.20 +
+        exp_score * 0.15 +
+        edu_score * 0.10
+    )
+
+    final_score = round(final_score,2)
+
+    result = {
+        "ATS Score": final_score,
+        "Matched Skills": matched_skills,
+        "Missing Skills": list(set(jd_skills) - set(resume_skills)),
+        "Matched Tools": matched_tools,
+        "Resume Skills": resume_skills,
+        "JD Skills": jd_skills
+    }
+
+    return result
