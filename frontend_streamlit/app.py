@@ -404,7 +404,7 @@ if st.session_state.page == "upload":
 
         if st.session_state.analysis_result is None:
             with st.spinner("🧠 AI is analyzing your resume..."):
-                try: resp = requests.post(API_URL,json={"resume_text":rt},timeout=120)
+                try: resp = requests.post(API_URL,json={"resume_text":rt},timeout=300)
                 except requests.exceptions.ConnectionError:
                     st.error("❌ Backend not running."); st.stop()
             res = safe_json(resp)
@@ -590,58 +590,41 @@ elif st.session_state.page=="jobs" and has_result():
 
     page_header("Job Matching","AI-matched roles based on your resume profile",f"Role: {role}")
 
-    # Filter out error/message dicts
-    jobs_valid = [j for j in jobs if isinstance(j,dict) and "Job Title" in j]
-
-    if jobs_valid:
-        jobs_s   = sorted(jobs_valid, key=lambda x: x.get("Match Score", 0), reverse=True)
-        titles   = [j.get("Job Title","Unknown").replace("-"," ").title() for j in jobs_s]
-        scores   = [round(j.get("Match Score", 0), 1) for j in jobs_s]
-        colors_j = ["#10b981" if s>=60 else "#6366f1" if s>=40 else "#8b5cf6" for s in scores]
+    if jobs:
+        jobs_s = sorted(jobs,key=lambda x:x.get("Match Score",0) if isinstance(x,dict) else 0,reverse=True)
+        titles = [j.get("Job Title","").replace("-"," ").title() if isinstance(j,dict) else str(j) for j in jobs_s]
+        scores = [round(j.get("Match Score",0),1) if isinstance(j,dict) else 0 for j in jobs_s]
+        colors_j= ["#10b981" if s>=60 else "#6366f1" if s>=40 else "#8b5cf6" for s in scores]
 
         fig_j = go.Figure(go.Bar(
-            x=scores, y=titles, orientation='h',
-            marker=dict(color=colors_j, line=dict(width=0)),
+            x=scores,y=titles,orientation='h',
+            marker=dict(color=colors_j,line=dict(width=0)),
             text=[f"  {s}%" for s in scores],
-            textposition='outside', textfont=dict(color="#606088", size=12),
+            textposition='outside',textfont=dict(color="#606088",size=12),
         ))
         fig_j.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(range=[0,135], showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, tickfont=dict(color="#9090b8",size=13), autorange="reversed"),
-            margin=dict(t=10,b=10,l=10,r=70), height=max(260,len(jobs_s)*52), bargap=0.38,
+            paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(range=[0,135],showgrid=False,zeroline=False,showticklabels=False),
+            yaxis=dict(showgrid=False,zeroline=False,tickfont=dict(color="#9090b8",size=13),autorange="reversed"),
+            margin=dict(t=10,b=10,l=10,r=70),height=max(260,len(jobs_s)*52),bargap=0.38,
         )
-        st.plotly_chart(fig_j, width="stretch")
+        st.plotly_chart(fig_j,width="stretch")
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
         st.markdown('<div class="sh">📋 Job Match Details</div>', unsafe_allow_html=True)
-        cols = st.columns(min(len(jobs_s), 3), gap="medium")
-        for i, job in enumerate(jobs_s[:6]):
-            t   = job.get("Job Title","Unknown").replace("-"," ").title()
-            sc  = round(job.get("Match Score", 0), 1)
-            co  = job.get("Company","")
-            loc = job.get("Location","")
-            sal = job.get("Salary Range","")
-            wt  = job.get("Work Type","")
-            exp = job.get("Experience","")
-            c   = "#10b981" if sc>=60 else "#6366f1" if sc>=40 else "#8b5cf6"
-            ft  = "Strong Fit ✅" if sc>=60 else "Good Fit 👍" if sc>=40 else "Partial Fit 📌"
+        cols = st.columns(min(len(jobs_s),3),gap="medium")
+        for i,job in enumerate(jobs_s[:6]):
+            t  = job.get("Job Title","").replace("-"," ").title() if isinstance(job,dict) else str(job)
+            sc = round(job.get("Match Score",0),1) if isinstance(job,dict) else 0
+            c  = "#10b981" if sc>=60 else "#6366f1" if sc>=40 else "#8b5cf6"
+            ft = "Strong Fit ✅" if sc>=60 else "Good Fit 👍" if sc>=40 else "Partial Fit 📌"
             with cols[i%3]:
                 st.markdown(f"""<div class="card" style="margin-bottom:0.8rem;">
                     <div class="c-lbl">{ft}</div>
                     <div style="font-family:Syne,sans-serif;font-size:1rem;font-weight:700;color:#d0d0f0;margin:0.4rem 0;">{t}</div>
                     <div style="font-family:Syne,sans-serif;font-size:1.6rem;font-weight:800;color:{c};">{sc}%</div>
                     <div class="c-bar"><div class="c-fill" style="width:{min(sc,100)}%;background:{c};"></div></div>
-                    <div style="margin-top:0.8rem;font-size:0.72rem;color:#45456a;line-height:1.9;">
-                        {"🏢 "+co+"<br>" if co else ""}
-                        {"📍 "+loc+"<br>" if loc else ""}
-                        {"💰 "+sal+"<br>" if sal else ""}
-                        {"🕐 "+wt+"<br>" if wt else ""}
-                        {"🎯 "+exp if exp else ""}
-                    </div>
                 </div>""", unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="b-warn">⚠️ No job matches found for your role. Try re-uploading your resume or check that job_description.csv is in the dataset folder.</div>', unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -906,9 +889,9 @@ elif st.session_state.page=="analytics" and has_result():
     # Job match chart
     if jobs:
         st.markdown('<div class="sh">💼 Job Match Score Visualization</div>', unsafe_allow_html=True)
-        jobs_s=sorted([j for j in jobs if isinstance(j,dict) and "Job Title" in j],key=lambda x:x.get("Match Score",0),reverse=True)[:8]
-        titles=[j.get("Job Title","").replace("-"," ").title() for j in jobs_s]
-        scores_j=[round(j.get("Match Score",0),1) for j in jobs_s]
+        jobs_s=sorted(jobs,key=lambda x:x.get("Match Score",0) if isinstance(x,dict) else 0,reverse=True)[:8]
+        titles=[j.get("Job Title","").replace("-"," ").title() if isinstance(j,dict) else str(j) for j in jobs_s]
+        scores_j=[round(j.get("Match Score",0),1) if isinstance(j,dict) else 0 for j in jobs_s]
         fig_jb=go.Figure(go.Bar(
             x=titles,y=scores_j,
             marker=dict(color=scores_j,colorscale=[[0,"#1e1060"],[1,"#10b981"]],line=dict(width=0)),
@@ -944,8 +927,8 @@ elif st.session_state.page=="export" and has_result():
     now = datetime.now().strftime("%d %B %Y, %I:%M %p")
 
     # Generate report text
-    jobs_s = sorted([j for j in jobs if isinstance(j,dict) and "Job Title" in j],key=lambda x:x.get("Match Score",0),reverse=True)[:5]
-    job_lines="\n".join([f"  {i+1}. {j.get('Job Title','').replace('-',' ').title()} — {round(j.get('Match Score',0),1)}%" for i,j in enumerate(jobs_s)])
+    jobs_s = sorted(jobs,key=lambda x:x.get("Match Score",0) if isinstance(x,dict) else 0,reverse=True)[:5]
+    job_lines="\n".join([f"  {i+1}. {j.get('Job Title','').replace('-',' ').title()} — {round(j.get('Match Score',0),1)}%" for i,j in enumerate(jobs_s) if isinstance(j,dict)])
 
     report = f"""
 ╔══════════════════════════════════════════════════════════════╗

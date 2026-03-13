@@ -1,6 +1,4 @@
-import sys
-import os
-
+import sys, os, concurrent.futures
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, request, jsonify
@@ -17,6 +15,9 @@ from services.career_path       import recommend_career
 app = Flask(__name__)
 CORS(app)
 
+# Thread pool — reused across requests (avoids thread creation overhead)
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
 
 @app.route("/")
 def home():
@@ -28,13 +29,10 @@ def validate_resume():
     data = request.get_json()
     if not data:
         return jsonify({"is_valid": False, "error": "No JSON received."}), 400
-
     resume_text = data.get("resume_text", "")
     valid, reason = is_resume(resume_text)
-
     if not valid:
         return jsonify({"is_valid": False, "error": reason}), 400
-
     return jsonify({"is_valid": True}), 200
 
 
@@ -53,41 +51,48 @@ def analyze_resume():
     if not valid:
         return jsonify({"error": reason}), 422
 
-    # Step 2: Parse & clean resume
+    # Step 2: Parse
     parsed_resume = parse_resume(resume_text)
 
-    # Step 3: Predict role (needed early for JD lookup)
+    # Step 3: Predict role
     role = predict_role(parsed_resume)
 
-    # Step 4: Extract resume skills (needed for JD matching + ATS)
+    # Step 4: Extract skills
     resume_skills = extract_skills(parsed_resume)
 
-    # Step 5: Find best matching JD from dataset
-    best_jd = get_best_jd_for_ats(parsed_resume, role, resume_skills)
+    # ── Run job matching in background thread while other steps run ───────────
+    job_future = _executor.submit(match_jobs, parsed_resume, role, resume_skills, 5)
 
-    # Fallback if no JD found in dataset
+    # Step 5: Best JD for ATS (reuses top job match — fast, no extra CSV read)
+    # We do this after submitting job_future so it runs concurrently
+    best_jd_future = _executor.submit(get_best_jd_for_ats, parsed_resume, role, resume_skills)
+
+    # Step 6: Skill gap, suggestions, career path run on main thread (fast)
+    present_skills, missing_skills = detect_skill_gap(parsed_resume, predicted_role=role)
+    suggestions = generate_suggestions(0, missing_skills, parsed_resume)  # temp score
+    career      = recommend_career(role)
+
+    # Step 7: Collect job results (wait here — but other steps already done)
+    try:
+        jobs   = job_future.result(timeout=240)
+        best_jd = best_jd_future.result(timeout=10)
+    except concurrent.futures.TimeoutError:
+        jobs    = [{"message": "Job matching timed out. Try again."}]
+        best_jd = ""
+
     if not best_jd:
         best_jd = (
-            "Looking for a skilled professional with experience in "
-            + role + ". Strong technical and communication skills required."
+            f"Looking for a skilled {role} professional with strong technical "
+            "and communication skills."
         )
 
-    # Step 6: ATS Score against the real dataset JD
+    # Step 8: ATS score with best JD
     ats_score, matched_skills, missing_from_jd, _ = calculate_ats_score(
         parsed_resume, best_jd
     )
 
-    # Step 7: Top job matches from dataset
-    jobs = match_jobs(parsed_resume, role, resume_skills, top_n=5)
-
-    # Step 8: Skill gap (role-aware)
-    present_skills, missing_skills = detect_skill_gap(parsed_resume, predicted_role=role)
-
-    # Step 9: Suggestions
+    # Re-generate suggestions with real ATS score
     suggestions = generate_suggestions(ats_score, missing_skills, parsed_resume)
-
-    # Step 10: Career path
-    career = recommend_career(role)
 
     return jsonify({
         "ATS Score"          : ats_score,
@@ -104,4 +109,4 @@ def analyze_resume():
 
 
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(debug=False, threaded=True)
