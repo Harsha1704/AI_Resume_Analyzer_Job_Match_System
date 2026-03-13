@@ -16,10 +16,10 @@ JD_CSV_PATH = next(
     os.path.join(DATASET_FOLDER, "job_descriptions.csv")
 )
 
-CHUNK_SIZE   = 10_000   # larger chunks = fewer I/O reads
+CHUNK_SIZE   = 20_000   # read more rows per I/O operation   # larger chunks = fewer I/O reads
 TOP_N        = 5
-MAX_FILTER   = 300      # max role-filtered rows to score (keeps it fast)
-FALLBACK_MAX = 10_000   # rows to scan in fallback
+MAX_FILTER   = 150      # score top 150 matches — enough for top 5      # max role-filtered rows to score (keeps it fast)
+FALLBACK_MAX = 5_000    # fallback scans first 5k rows only   # rows to scan in fallback
 
 ROLE_SYNONYMS = {
     "data science"     : ["data scien", "data analyst", "machine learning", "ml engineer", "ai engineer", "data engineer"],
@@ -167,9 +167,10 @@ def match_jobs(resume_text: str, predicted_role: str, resume_skills: list,
     if not filtered_rows:
         return _fallback_match(resume_emb, resume_skills, top_n)
 
-    # ── Step 2: Build JD texts and BATCH encode all at once ──────────────────
+    # ── Step 2: Pre-filter by skill overlap (cheap, before encoding) ─────────
     jd_col  = cm.get("jd")
     sk_col  = cm.get("skills")
+    filtered_rows = _skill_prefilter(filtered_rows, resume_skills, jd_col, sk_col, top_n=150)
 
     jd_texts = []
     for row in filtered_rows:
@@ -283,3 +284,34 @@ def get_best_jd_for_ats(resume_text: str, predicted_role: str,
     if matches and "error" not in matches[0] and "message" not in matches[0]:
         return matches[0].get("Job Description Preview", "")
     return ""
+
+
+# ── Pre-filter by skill overlap before expensive encoding ────────────────────
+def _skill_prefilter(rows: list, resume_skills: list, jd_col, sk_col, top_n=150) -> list:
+    """
+    Cheap string-match pre-filter. Keeps only rows with at least 1 skill overlap.
+    Sorts by overlap count descending and returns top_n.
+    This avoids encoding rows that have zero relevance.
+    """
+    if not resume_skills:
+        return rows[:top_n]
+
+    scored = []
+    skills_lower = [s.lower() for s in resume_skills]
+
+    for row in rows:
+        jd_text = (
+            str(row.get(jd_col, "")) + " " + str(row.get(sk_col, ""))
+        ).lower()
+        overlap = sum(1 for s in skills_lower if s in jd_text)
+        if overlap > 0:
+            scored.append((overlap, row))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    result = [r for _, r in scored[:top_n]]
+
+    # If not enough overlap matches, pad with first rows
+    if len(result) < 5:
+        result = rows[:top_n]
+
+    return result

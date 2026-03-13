@@ -6,7 +6,7 @@ from flask_cors import CORS
 
 from services.resume_parser     import parse_resume, is_resume
 from services.ats_score         import calculate_ats_score, extract_skills
-from services.job_matcher       import match_jobs, get_best_jd_for_ats
+from services.job_matcher       import match_jobs
 from services.skill_gap         import detect_skill_gap
 from services.role_predictor    import predict_role
 from services.suggestion_engine import generate_suggestions
@@ -15,7 +15,6 @@ from services.career_path       import recommend_career
 app = Flask(__name__)
 CORS(app)
 
-# Thread pool — reused across requests (avoids thread creation overhead)
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
@@ -60,38 +59,36 @@ def analyze_resume():
     # Step 4: Extract skills
     resume_skills = extract_skills(parsed_resume)
 
-    # ── Run job matching in background thread while other steps run ───────────
+    # Step 5: Launch job matching in background (ONE CSV scan only)
     job_future = _executor.submit(match_jobs, parsed_resume, role, resume_skills, 5)
 
-    # Step 5: Best JD for ATS (reuses top job match — fast, no extra CSV read)
-    # We do this after submitting job_future so it runs concurrently
-    best_jd_future = _executor.submit(get_best_jd_for_ats, parsed_resume, role, resume_skills)
-
-    # Step 6: Skill gap, suggestions, career path run on main thread (fast)
+    # Step 6: Fast steps run on main thread while CSV is being scanned
     present_skills, missing_skills = detect_skill_gap(parsed_resume, predicted_role=role)
-    suggestions = generate_suggestions(0, missing_skills, parsed_resume)  # temp score
-    career      = recommend_career(role)
+    career = recommend_career(role)
 
-    # Step 7: Collect job results (wait here — but other steps already done)
+    # Step 7: Wait for job results
     try:
-        jobs   = job_future.result(timeout=240)
-        best_jd = best_jd_future.result(timeout=10)
+        jobs = job_future.result(timeout=240)
     except concurrent.futures.TimeoutError:
-        jobs    = [{"message": "Job matching timed out. Try again."}]
-        best_jd = ""
+        jobs = [{"message": "Job matching timed out. Try again."}]
+
+    # Step 8: Extract best JD directly from top job match — NO second CSV scan
+    best_jd = ""
+    if jobs and "Job Description Preview" in jobs[0]:
+        best_jd = jobs[0].get("Job Description Preview", "")
 
     if not best_jd:
         best_jd = (
             f"Looking for a skilled {role} professional with strong technical "
-            "and communication skills."
+            "and communication skills. " + " ".join(resume_skills[:10])
         )
 
-    # Step 8: ATS score with best JD
+    # Step 9: ATS score
     ats_score, matched_skills, missing_from_jd, _ = calculate_ats_score(
         parsed_resume, best_jd
     )
 
-    # Re-generate suggestions with real ATS score
+    # Step 10: Suggestions with real ATS score
     suggestions = generate_suggestions(ats_score, missing_skills, parsed_resume)
 
     return jsonify({
