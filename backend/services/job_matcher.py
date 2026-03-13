@@ -1,6 +1,7 @@
 import os
 import re
 import pandas as pd
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -8,7 +9,6 @@ from config import DATASET_FOLDER
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# Auto-detect filename — handles job_descriptions.csv and job_description.csv
 _csv_candidates = ["job_descriptions.csv", "job_description.csv"]
 JD_CSV_PATH = next(
     (os.path.join(DATASET_FOLDER, f) for f in _csv_candidates
@@ -16,8 +16,10 @@ JD_CSV_PATH = next(
     os.path.join(DATASET_FOLDER, "job_descriptions.csv")
 )
 
-CHUNK_SIZE = 5_000
-TOP_N      = 5
+CHUNK_SIZE   = 10_000   # larger chunks = fewer I/O reads
+TOP_N        = 5
+MAX_FILTER   = 300      # max role-filtered rows to score (keeps it fast)
+FALLBACK_MAX = 10_000   # rows to scan in fallback
 
 ROLE_SYNONYMS = {
     "data science"     : ["data scien", "data analyst", "machine learning", "ml engineer", "ai engineer", "data engineer"],
@@ -52,10 +54,10 @@ ROLE_SYNONYMS = {
 }
 
 
-def _clean(text):
-    if not isinstance(text, str):
+def _clean(val):
+    if not isinstance(val, str):
         return ""
-    return re.sub(r'\s+', ' ', text).strip()
+    return re.sub(r'\s+', ' ', val).strip()
 
 
 def _get_search_keywords(predicted_role: str) -> list:
@@ -67,61 +69,69 @@ def _get_search_keywords(predicted_role: str) -> list:
     return [role_lower] + [w for w in words if len(w) > 3]
 
 
-def _row_matches_role(row_role, row_title, keywords) -> bool:
-    combined = (str(row_role) + " " + str(row_title)).lower()
-    return any(kw in combined for kw in keywords)
+def _detect_columns(df: pd.DataFrame) -> dict:
+    """Map logical names → actual column names using case-insensitive matching."""
+    cols = df.columns.tolist()
+    def find(candidates):
+        for c in candidates:
+            for ac in cols:
+                if ac.lower().strip() == c.lower():
+                    return ac
+        return None
+
+    return {
+        "title"  : find(["job title", "title"]),
+        "role"   : find(["role"]),
+        "jd"     : find(["job description", "description"]),
+        "skills" : find(["skills", "skill"]),
+        "company": find(["company"]),
+        "loc"    : find(["location", "city", "loc"]),
+        "country": find(["country"]),
+        "salary" : find(["salary range", "salary"]),
+        "wtype"  : find(["work type", "worktype", "employment type"]),
+        "exp"    : find(["experience"]),
+        "portal" : find(["job portal", "portal", "source"]),
+        "benefits": find(["benefits"]),
+    }
 
 
-def _score_jd(resume_embedding, jd_text: str, resume_skills: list) -> float:
-    if not jd_text:
-        return 0.0
-    jd_emb    = model.encode([jd_text])
-    sem_score = float(cosine_similarity(resume_embedding, jd_emb)[0][0]) * 100
-    jd_lower  = jd_text.lower()
-    matched   = sum(1 for s in resume_skills if s.lower() in jd_lower)
-    skill_score = (matched / max(len(resume_skills), 1)) * 100
-    return round(0.5 * sem_score + 0.5 * skill_score, 2)
+def _batch_score(resume_emb, jd_texts: list, resume_skills: list) -> list:
+    """
+    Encode ALL jd_texts in ONE model call → 10-20x faster than one-by-one.
+    Returns list of float scores.
+    """
+    if not jd_texts:
+        return []
 
+    # Single batch encode
+    jd_embs    = model.encode(jd_texts, batch_size=64, show_progress_bar=False)
+    sem_scores = cosine_similarity(resume_emb, jd_embs)[0] * 100  # shape (N,)
 
-def _get_col(row, *candidates):
-    """Get value from row trying multiple possible column name variants."""
-    for c in candidates:
-        if c in row.index and pd.notna(row[c]):
-            return str(row[c]).strip()
-    return ""
+    scores = []
+    for i, jd_text in enumerate(jd_texts):
+        jd_lower    = jd_text.lower()
+        matched     = sum(1 for s in resume_skills if s.lower() in jd_lower)
+        skill_score = (matched / max(len(resume_skills), 1)) * 100
+        scores.append(round(0.5 * float(sem_scores[i]) + 0.5 * skill_score, 2))
+
+    return scores
 
 
 def match_jobs(resume_text: str, predicted_role: str, resume_skills: list,
                top_n: int = TOP_N) -> list:
 
     if not os.path.exists(JD_CSV_PATH):
-        return [{"error": f"Dataset not found at {JD_CSV_PATH}. File name should be job_descriptions.csv"}]
+        return [{"error": f"Dataset not found: {JD_CSV_PATH}"}]
 
     keywords   = _get_search_keywords(predicted_role)
-    resume_emb = model.encode([resume_text])
-    candidates = []
+    resume_emb = model.encode([resume_text])  # shape (1, dim)
+
+    # ── Step 1: Collect filtered rows (keyword match only, no encoding yet) ──
+    filtered_rows = []
 
     try:
-        # Read first chunk to detect actual column names
-        sample = pd.read_csv(JD_CSV_PATH, nrows=1, encoding="utf-8", on_bad_lines="skip")
-        actual_cols = set(sample.columns.tolist())
-
-        # Map wanted columns to actual column names (case-insensitive)
-        col_map = {}
-        wanted = ["Job Title", "Role", "Job Description", "skills", "Company",
-                  "location", "Country", "Salary Range", "Work Type",
-                  "Experience", "Job Portal", "Benefits"]
-        for w in wanted:
-            for ac in actual_cols:
-                if w.lower() == ac.lower():
-                    col_map[w] = ac
-                    break
-
-        use_cols = list(col_map.values())
-
         reader = pd.read_csv(
             JD_CSV_PATH,
-            usecols=use_cols if use_cols else None,
             chunksize=CHUNK_SIZE,
             on_bad_lines="skip",
             encoding="utf-8",
@@ -130,125 +140,141 @@ def match_jobs(resume_text: str, predicted_role: str, resume_skills: list,
     except Exception as e:
         return [{"error": f"Failed to read dataset: {str(e)}"}]
 
-    # Resolve actual column names to use
-    role_col  = col_map.get("Role", "Role")
-    title_col = col_map.get("Job Title", "Job Title")
-    jd_col    = col_map.get("Job Description", "Job Description")
-    sk_col    = col_map.get("skills", "skills")
-    co_col    = col_map.get("Company", "Company")
-    loc_col   = col_map.get("location", "location")
-    cnt_col   = col_map.get("Country", "Country")
-    sal_col   = col_map.get("Salary Range", "Salary Range")
-    wt_col    = col_map.get("Work Type", "Work Type")
-    exp_col   = col_map.get("Experience", "Experience")
-    por_col   = col_map.get("Job Portal", "Job Portal")
-    ben_col   = col_map.get("Benefits", "Benefits")
+    cm = None  # column map, detected on first chunk
 
     for chunk in reader:
         chunk = chunk.fillna("")
+        if cm is None:
+            cm = _detect_columns(chunk)
 
-        # Safe role/title filter
-        r_col_exists = role_col in chunk.columns
-        t_col_exists = title_col in chunk.columns
+        role_col  = cm.get("role")
+        title_col = cm.get("title")
 
-        if not r_col_exists and not t_col_exists:
-            continue
+        def matches(row):
+            r = str(row[role_col])  if role_col  else ""
+            t = str(row[title_col]) if title_col else ""
+            combined = (r + " " + t).lower()
+            return any(kw in combined for kw in keywords)
 
-        def row_matches(row):
-            r = str(row[role_col]) if r_col_exists else ""
-            t = str(row[title_col]) if t_col_exists else ""
-            return _row_matches_role(r, t, keywords)
-
-        mask     = chunk.apply(row_matches, axis=1)
+        mask     = chunk.apply(matches, axis=1)
         filtered = chunk[mask]
+        filtered_rows.extend(filtered.to_dict("records"))
 
-        if filtered.empty:
-            continue
-
-        for _, row in filtered.iterrows():
-            jd_text = (
-                _clean(row.get(jd_col, "")) + " " +
-                _clean(row.get(sk_col, ""))
-            ).strip()
-            score = _score_jd(resume_emb, jd_text, resume_skills)
-
-            candidates.append({
-                "Job Title"              : _clean(row.get(title_col, "")),
-                "Role"                   : _clean(row.get(role_col, "")),
-                "Company"                : _clean(row.get(co_col, "")),
-                "Location"               : _clean(row.get(loc_col, "")) + (", " + _clean(row.get(cnt_col, "")) if _clean(row.get(cnt_col, "")) else ""),
-                "Salary Range"           : _clean(row.get(sal_col, "")),
-                "Work Type"              : _clean(row.get(wt_col, "")),
-                "Experience"             : _clean(row.get(exp_col, "")),
-                "Job Portal"             : _clean(row.get(por_col, "")),
-                "Benefits"               : _clean(row.get(ben_col, "")),
-                "Match Score"            : score,
-                "Job Description Preview": jd_text[:300] + "..." if len(jd_text) > 300 else jd_text,
-            })
-
-        strong = [c for c in candidates if c["Match Score"] >= 60]
-        if len(strong) >= top_n * 3:
+        # Stop collecting once we have enough candidates
+        if len(filtered_rows) >= MAX_FILTER:
             break
 
-    if not candidates:
+    if not filtered_rows:
         return _fallback_match(resume_emb, resume_skills, top_n)
 
-    candidates.sort(key=lambda x: x["Match Score"], reverse=True)
-    return candidates[:top_n]
+    # ── Step 2: Build JD texts and BATCH encode all at once ──────────────────
+    jd_col  = cm.get("jd")
+    sk_col  = cm.get("skills")
+
+    jd_texts = []
+    for row in filtered_rows:
+        jd  = _clean(row.get(jd_col,  "")) if jd_col  else ""
+        sk  = _clean(row.get(sk_col,  "")) if sk_col  else ""
+        jd_texts.append((jd + " " + sk).strip())
+
+    scores = _batch_score(resume_emb, jd_texts, resume_skills)
+
+    # ── Step 3: Build result dicts ────────────────────────────────────────────
+    t_col   = cm.get("title")
+    r_col   = cm.get("role")
+    co_col  = cm.get("company")
+    loc_col = cm.get("loc")
+    cnt_col = cm.get("country")
+    sal_col = cm.get("salary")
+    wt_col  = cm.get("wtype")
+    exp_col = cm.get("exp")
+    por_col = cm.get("portal")
+    ben_col = cm.get("benefits")
+
+    results = []
+    for row, jd_text, score in zip(filtered_rows, jd_texts, scores):
+        loc = _clean(row.get(loc_col, "")) if loc_col else ""
+        cnt = _clean(row.get(cnt_col, "")) if cnt_col else ""
+        results.append({
+            "Job Title"              : _clean(row.get(t_col,   "")) if t_col   else "",
+            "Role"                   : _clean(row.get(r_col,   "")) if r_col   else "",
+            "Company"                : _clean(row.get(co_col,  "")) if co_col  else "",
+            "Location"               : (loc + (", " + cnt if cnt else "")).strip(", "),
+            "Salary Range"           : _clean(row.get(sal_col, "")) if sal_col else "",
+            "Work Type"              : _clean(row.get(wt_col,  "")) if wt_col  else "",
+            "Experience"             : _clean(row.get(exp_col, "")) if exp_col else "",
+            "Job Portal"             : _clean(row.get(por_col, "")) if por_col else "",
+            "Benefits"               : _clean(row.get(ben_col, "")) if ben_col else "",
+            "Match Score"            : score,
+            "Job Description Preview": jd_text[:300] + "..." if len(jd_text) > 300 else jd_text,
+        })
+
+    results.sort(key=lambda x: x["Match Score"], reverse=True)
+    return results[:top_n]
 
 
 def _fallback_match(resume_emb, resume_skills: list, top_n: int) -> list:
-    """Scan first 20k rows regardless of role — always returns something."""
-    candidates   = []
-    rows_scanned = 0
+    """Scan first FALLBACK_MAX rows with batch encoding — fast fallback."""
+    rows = []
+    cm   = None
     try:
         reader = pd.read_csv(
             JD_CSV_PATH, chunksize=CHUNK_SIZE,
             on_bad_lines="skip", encoding="utf-8", low_memory=True,
         )
+        collected = 0
         for chunk in reader:
             chunk = chunk.fillna("")
-            # Detect columns dynamically
-            cols = chunk.columns.tolist()
-            jd_col  = next((c for c in cols if "description" in c.lower()), None)
-            sk_col  = next((c for c in cols if c.lower() == "skills"), None)
-            t_col   = next((c for c in cols if "title" in c.lower()), None)
-            r_col   = next((c for c in cols if c.lower() == "role"), None)
-            co_col  = next((c for c in cols if "company" in c.lower() and "profile" not in c.lower()), None)
-            loc_col = next((c for c in cols if c.lower() in ["location","city","loc"]), None)
-            sal_col = next((c for c in cols if "salary" in c.lower()), None)
-            wt_col  = next((c for c in cols if "work type" in c.lower() or c.lower()=="work type"), None)
-            exp_col = next((c for c in cols if "experience" in c.lower()), None)
-
-            for _, row in chunk.iterrows():
-                jd_text = (
-                    (_clean(row.get(jd_col,"")) if jd_col else "") + " " +
-                    (_clean(row.get(sk_col,"")) if sk_col else "")
-                ).strip()
-                score = _score_jd(resume_emb, jd_text, resume_skills)
-                candidates.append({
-                    "Job Title"              : _clean(row.get(t_col,"")) if t_col else "",
-                    "Role"                   : _clean(row.get(r_col,"")) if r_col else "",
-                    "Company"                : _clean(row.get(co_col,"")) if co_col else "",
-                    "Location"               : _clean(row.get(loc_col,"")) if loc_col else "",
-                    "Salary Range"           : _clean(row.get(sal_col,"")) if sal_col else "",
-                    "Work Type"              : _clean(row.get(wt_col,"")) if wt_col else "",
-                    "Experience"             : _clean(row.get(exp_col,"")) if exp_col else "",
-                    "Job Portal"             : "",
-                    "Benefits"               : "",
-                    "Match Score"            : score,
-                    "Job Description Preview": jd_text[:300] + "..." if len(jd_text) > 300 else jd_text,
-                })
-            rows_scanned += len(chunk)
-            if rows_scanned >= 20_000:
+            if cm is None:
+                cm = _detect_columns(chunk)
+            rows.extend(chunk.to_dict("records"))
+            collected += len(chunk)
+            if collected >= FALLBACK_MAX:
                 break
     except Exception:
-        pass
-
-    if not candidates:
         return [{"message": "No matching jobs found in dataset."}]
-    candidates.sort(key=lambda x: x["Match Score"], reverse=True)
-    return candidates[:top_n]
+
+    if not rows or cm is None:
+        return [{"message": "No matching jobs found in dataset."}]
+
+    jd_col = cm.get("jd")
+    sk_col = cm.get("skills")
+    jd_texts = [
+        (_clean(r.get(jd_col,"")) if jd_col else "") + " " +
+        (_clean(r.get(sk_col,"")) if sk_col else "")
+        for r in rows
+    ]
+    scores = _batch_score(resume_emb, jd_texts, resume_skills)
+
+    t_col   = cm.get("title")
+    r_col   = cm.get("role")
+    co_col  = cm.get("company")
+    loc_col = cm.get("loc")
+    cnt_col = cm.get("country")
+    sal_col = cm.get("salary")
+    wt_col  = cm.get("wtype")
+    exp_col = cm.get("exp")
+
+    results = []
+    for row, jd_text, score in zip(rows, jd_texts, scores):
+        loc = _clean(row.get(loc_col,"")) if loc_col else ""
+        cnt = _clean(row.get(cnt_col,"")) if cnt_col else ""
+        results.append({
+            "Job Title"              : _clean(row.get(t_col,  "")) if t_col  else "",
+            "Role"                   : _clean(row.get(r_col,  "")) if r_col  else "",
+            "Company"                : _clean(row.get(co_col, "")) if co_col else "",
+            "Location"               : (loc + (", " + cnt if cnt else "")).strip(", "),
+            "Salary Range"           : _clean(row.get(sal_col,"")) if sal_col else "",
+            "Work Type"              : _clean(row.get(wt_col, "")) if wt_col  else "",
+            "Experience"             : _clean(row.get(exp_col,"")) if exp_col else "",
+            "Job Portal"             : "",
+            "Benefits"               : "",
+            "Match Score"            : score,
+            "Job Description Preview": jd_text[:300] + "..." if len(jd_text) > 300 else jd_text,
+        })
+
+    results.sort(key=lambda x: x["Match Score"], reverse=True)
+    return results[:top_n]
 
 
 def get_best_jd_for_ats(resume_text: str, predicted_role: str,
